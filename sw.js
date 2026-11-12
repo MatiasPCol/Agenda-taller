@@ -1,5 +1,5 @@
 // Service worker de la Agenda del taller: permite instalarla y abrirla sin internet.
-const CACHE = 'agenda-taller-v2';
+const CACHE = 'agenda-taller-v3';
 const SHELL = ['/', '/manifest.webmanifest', '/icon-192.png', '/icon-512.png', '/apple-touch-icon.png'];
 
 self.addEventListener('install', (e) => {
@@ -43,6 +43,31 @@ self.addEventListener('fetch', (e) => {
         return res;
       }).catch(() => hit);
       return hit || net;
+    })
+  );
+});
+
+// Aviso diario: lo manda la función recordatorio-diario de Supabase.
+self.addEventListener('push', (e) => {
+  let d = {};
+  try { d = e.data ? e.data.json() : {}; } catch (_) { d = { body: e.data ? e.data.text() : '' }; }
+  e.waitUntil(self.registration.showNotification(d.title || 'Agenda del taller', {
+    body: d.body || '',
+    icon: '/icon-192.png',
+    badge: '/icon-192.png',
+    tag: 'agenda-manana',
+    renotify: true,
+    data: { url: d.url || '/' },
+  }));
+});
+
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  const url = (e.notification.data && e.notification.data.url) || '/';
+  e.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((ws) => {
+      for (const w of ws) { if ('focus' in w) return w.focus(); }
+      return self.clients.openWindow(url);
     })
   );
 });

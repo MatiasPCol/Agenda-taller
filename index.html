@@ -137,6 +137,12 @@ input[type=date]::-webkit-date-and-time-value{text-align:left}
 .group h3{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding-top:4px;display:flex;justify-content:space-between}
 .group.l h3{color:var(--late)} .group.w h3{color:var(--warn)}
 .foot{font-size:12px;color:var(--muted);text-align:center}
+.av{display:flex;flex-direction:column;gap:10px}
+.av p{margin:0;font-size:14px;color:var(--muted)}
+.av p b{color:var(--ink)}
+.av select{min-height:44px;border:1px solid var(--line);border-radius:4px;background:var(--surface);color:var(--ink);font:inherit;font-size:16px;padding:0 10px}
+.pill{font-size:12px;font-weight:600;border-radius:999px;padding:2px 9px;border:1px solid var(--line);color:var(--muted)}
+.pill.on{background:var(--ok);border-color:var(--ok);color:#fff}
 .fab{position:fixed;right:16px;bottom:calc(16px + var(--sab));z-index:5;background:var(--accent);color:var(--on-accent);border:0;border-radius:6px;padding:13px 18px;font-weight:600;min-height:48px;box-shadow:0 6px 18px rgba(0,0,0,.28)}
 .sheet{position:fixed;top:0;left:0;right:0;height:100%;z-index:10;background:rgba(10,18,34,.55);display:flex;align-items:flex-end;justify-content:center}
 .sheet .form{background:var(--surface);border-radius:10px 10px 0 0;padding:16px 16px calc(16px + var(--sab));width:100%;max-width:640px;max-height:92%;overflow:auto;-webkit-overflow-scrolling:touch}
@@ -176,6 +182,7 @@ var SUPABASE_URL='https://bjhcoyoscmghvgdvfvao.supabase.co';
 var SUPABASE_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJqaGNveW9zY21naHZnZHZmdmFvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQ0OTkzNjEsImV4cCI6MjExMDA3NTM2MX0.xBJaC1sZcpyX3a6JppaDWI31kLE5vlefuL5ZxHShaE0';
 var $=function(id){return document.getElementById(id);};
 var OLD_LS='agenda-taller-v1';
+var VAPID_PUBLIC='BNap_R_JqRkl-8nIi9Tu8UXQ7tAV1cWe6O6RLsNqdP8Zd2bUDG2sZNRN8dkY7uFESrOaUPGN_d09Wi2TsX2sKRw';
 function get(k){try{return JSON.parse(localStorage.getItem(k));}catch(e){return null;}}
 function set(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch(e){}}
 
@@ -280,7 +287,9 @@ $('a-form').addEventListener('submit',function(e){
 $('salir').addEventListener('click',function(){
   if(!sb)return;
   try{if(user)localStorage.removeItem(cacheKey());}catch(e){}
-  sb.auth.signOut().finally(function(){showAuth();});
+  var sub=push.sub, pre=sub?sb.from('push_subs').delete().eq('endpoint',sub.endpoint).then(function(){return sub.unsubscribe();}).catch(function(){}):Promise.resolve();
+  push.sub=null;push.row=null;
+  pre.finally(function(){sb.auth.signOut().finally(function(){showAuth();});});
 });
 
 function showAuth(){
@@ -297,6 +306,7 @@ function showApp(u){
     if(c&&c.tasks){tasks=c.tasks;notes=c.notes||{};}
     render();
     loadAll();
+    loadPush();
   }
 }
 
@@ -332,6 +342,10 @@ function shell(){
   +'<button class="secondary" id="abrir"></button>'
   +'<label for="nota">Notas del día<textarea id="nota" maxlength="2000"></textarea></label></div></section>'
   +'<section class="card" id="todos"><div class="cardhead"><h2>Todos los pendientes</h2></div><div id="todos-lista"></div></section>'
+  +'<section class="card" id="avisos"><div class="cardhead"><h2>Aviso de entregas</h2><span class="pill" id="av-pill">Apagado</span></div>'
+  +'<div class="body av"><p id="av-txt"></p>'
+  +'<label for="av-hora">Hora del aviso<select id="av-hora"></select></label>'
+  +'<div class="actions"><button class="primary" id="av-on">Activar aviso</button><button class="secondary" id="av-test" hidden>Enviar prueba</button><button class="secondary" id="av-off" hidden>Desactivar</button></div></div></section>'
   +'<p class="foot">Los trabajos con más de 3 meses que ya vencieron se borran solos.</p>'
   +'<div class="sheet" id="sheet" hidden><form class="form" id="form" novalidate><h2>Nuevo trabajo</h2>'
   +'<label for="f-title">Trabajo<input type="text" id="f-title" maxlength="120" autocomplete="off"></label>'
@@ -390,6 +404,102 @@ function render(){
     return '<div class="group '+x[1]+'"><h3><span>'+x[0]+'</span><span>'+x[2].length+'</span></h3><ul class="list">'+x[2].map(function(t){return taskHTML(t,true);}).join('')+'</ul></div>';
   }).join('');
   $('todos-lista').innerHTML=h||'<div class="body"><div class="empty">No hay trabajos pendientes. Toca "+ Nuevo trabajo" para añadir uno.</div></div>';
+}
+
+/* ---------- aviso diario (notificaciones) ---------- */
+var push={sub:null,row:null,busy:false,hour:19};
+function isIOS(){return /iPhone|iPad|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);}
+function standalone(){return (window.matchMedia&&matchMedia('(display-mode: standalone)').matches)||navigator.standalone===true;}
+function pushSupport(){
+  if(isIOS()&&!standalone())return 'install';
+  if(!('serviceWorker' in navigator)||!('PushManager' in window)||!('Notification' in window))return 'no';
+  if(Notification.permission==='denied')return 'denied';
+  return 'ok';
+}
+function hourTxt(h){var am=h<12, hh=h%12||12;return hh+':00 '+(am?'a. m.':'p. m.');}
+function b64ToBytes(b){var pad='='.repeat((4-b.length%4)%4), s=atob((b+pad).replace(/-/g,'+').replace(/_/g,'/')), a=new Uint8Array(s.length);for(var i=0;i<s.length;i++)a[i]=s.charCodeAt(i);return a;}
+function swReady(){
+  return navigator.serviceWorker.getRegistration().then(function(r){
+    if(r)return navigator.serviceWorker.ready;
+    return navigator.serviceWorker.register('/sw.js').then(function(){return navigator.serviceWorker.ready;});
+  });
+}
+function renderPush(){
+  if(!$('av-txt'))return;
+  var sup=pushSupport(), on=!!(push.sub&&push.row), t=$('av-txt');
+  $('av-pill').textContent=on?'Activado':'Apagado'; $('av-pill').className='pill'+(on?' on':'');
+  $('av-hora').value=String(on?push.row.hour:push.hour);
+  $('av-on').hidden=on||sup!=='ok'; $('av-off').hidden=!on; $('av-test').hidden=!on;
+  $('av-on').disabled=$('av-off').disabled=$('av-test').disabled=$('av-hora').disabled=push.busy;
+  if(sup==='install')t.innerHTML='Para recibir avisos en el iPhone, primero <b>instala la app</b>: en Safari toca Compartir y luego "Agregar a inicio". Después ábrela desde el ícono y vuelve aquí.';
+  else if(sup==='no')t.textContent='Este navegador no permite avisos. Abre la agenda en Chrome o instálala en tu celular.';
+  else if(sup==='denied')t.innerHTML='Bloqueaste las notificaciones para esta app. Actívalas en los <b>ajustes del celular</b> (Notificaciones) y vuelve a intentar.';
+  else if(on)t.innerHTML='Todos los días a las <b>'+hourTxt(push.row.hour)+'</b> te llega un aviso en este dispositivo con lo que entregas al día siguiente. Si mañana no hay entregas, no te molesta.';
+  else t.textContent='Recibe cada día en este dispositivo un aviso con los trabajos que entregas al día siguiente.';
+}
+function loadPush(){
+  var opts='';for(var h=5;h<=22;h++)opts+='<option value="'+h+'">'+hourTxt(h)+'</option>';
+  $('av-hora').innerHTML=opts;
+  renderPush();
+  if(pushSupport()!=='ok')return;
+  navigator.serviceWorker.getRegistration().then(function(r){return r?r.pushManager.getSubscription():null;})
+  .then(function(sub){
+    push.sub=sub; if(!sub)return null;
+    return sb.from('push_subs').select('endpoint,hour').eq('endpoint',sub.endpoint).maybeSingle();
+  }).then(function(r){push.row=(r&&r.data)||null;renderPush();}).catch(function(){renderPush();});
+}
+function saveSub(sub,hour){
+  var j=sub.toJSON();
+  return sb.from('push_subs').upsert({user_id:user.id,endpoint:j.endpoint,p256dh:j.keys.p256dh,auth:j.keys.auth,hour:hour},{onConflict:'endpoint'})
+    .select('endpoint,hour').single().then(function(r){if(r.error)throw r.error;return r.data;});
+}
+function enablePush(){
+  if(push.busy)return; push.busy=true; renderPush();
+  var hour=+$('av-hora').value, reg;
+  Notification.requestPermission().then(function(p){
+    if(p!=='granted')throw {perm:true};
+    return swReady();
+  }).then(function(r){
+    reg=r; return reg.pushManager.getSubscription();
+  }).then(function(sub){
+    return sub||reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:b64ToBytes(VAPID_PUBLIC)});
+  }).then(function(sub){
+    push.sub=sub;
+    return saveSub(sub,hour).catch(function(){
+      // el dispositivo estaba ligado a otra cuenta: se crea una suscripción nueva
+      return sub.unsubscribe().then(function(){return reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:b64ToBytes(VAPID_PUBLIC)});})
+        .then(function(s2){push.sub=s2;return saveSub(s2,hour);});
+    });
+  }).then(function(row){
+    push.row=row; toast('Aviso activado: '+hourTxt(row.hour));
+  }).catch(function(e){
+    toast(e&&e.perm?'Necesitas permitir las notificaciones para activar el aviso.':errText(e));
+  }).finally(function(){push.busy=false;renderPush();});
+}
+function disablePush(){
+  if(push.busy||!push.sub)return; push.busy=true; renderPush();
+  var sub=push.sub;
+  sb.from('push_subs').delete().eq('endpoint',sub.endpoint).then(function(r){
+    if(r.error)throw r.error;
+    return sub.unsubscribe().catch(function(){});
+  }).then(function(){push.sub=null;push.row=null;toast('Aviso desactivado.');})
+  .catch(function(e){toast(errText(e));})
+  .finally(function(){push.busy=false;renderPush();});
+}
+function changeHour(){
+  var h=+$('av-hora').value;
+  if(!push.row){push.hour=h;return;}
+  push.busy=true;renderPush();
+  sb.from('push_subs').update({hour:h}).eq('endpoint',push.sub.endpoint).then(function(r){
+    if(r.error)throw r.error; push.row.hour=h; toast('Ahora el aviso llega a las '+hourTxt(h));
+  }).catch(function(e){toast(errText(e));}).finally(function(){push.busy=false;renderPush();});
+}
+function testPush(){
+  if(push.busy)return; push.busy=true; renderPush();
+  sb.functions.invoke('recordatorio-diario',{body:{test:true}}).then(function(r){
+    if(r.error)throw r.error;
+    toast(r.data&&r.data.sent?'Aviso de prueba enviado. Debe llegarte en unos segundos.':'No se pudo enviar el aviso. Desactívalo y actívalo otra vez.');
+  }).catch(function(e){toast(errText(e));}).finally(function(){push.busy=false;renderPush();});
 }
 
 /* La ventana de nuevo trabajo se ajusta al espacio que deja el teclado */
@@ -452,9 +562,13 @@ $('root').addEventListener('click',function(e){
   else if(b.id==='abrir'||b.id==='nuevo'){openSheet();}
   else if(b.id==='cerrar'){closeSheet();}
   else if(b.id==='importar'){importOld();}
+  else if(b.id==='av-on'){enablePush();}
+  else if(b.id==='av-off'){disablePush();}
+  else if(b.id==='av-test'){testPush();}
   else if(b.id==='descartar'){set('agenda-importado',true);render();}
 });
 $('sheet').addEventListener('click',function(e){if(e.target===this)closeSheet();});
+$('av-hora').addEventListener('change',changeHour);
 document.addEventListener('keydown',function(e){if(e.key==='Escape'&&formOpen)closeSheet();});
 $('nota').addEventListener('change',function(){
   var day=sel, v=this.value.trim(), prev=notes[day]||'';
@@ -504,7 +618,7 @@ if(!sb){
   });
 }
 
-if('serviceWorker' in navigator && location.protocol==='https:'){
+if('serviceWorker' in navigator && (location.protocol==='https:'||location.hostname==='localhost'||location.hostname==='127.0.0.1')){
   window.addEventListener('load',function(){navigator.serviceWorker.register('/sw.js').catch(function(){});});
 }
 })();

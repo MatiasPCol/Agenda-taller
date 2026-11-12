@@ -122,7 +122,10 @@ label{font-size:12px;font-weight:600;color:var(--muted);display:flex;flex-direct
 input[type=text],input[type=email],input[type=password],input[type=date],textarea{width:100%;background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:9px 10px;min-height:44px;font-size:16px}
 textarea{resize:vertical;min-height:70px}
 .row{display:flex;gap:10px;flex-wrap:wrap}
-.row>label{flex:1 1 150px}
+.row>label{flex:1 1 150px;min-width:0}
+input[type=date]{-webkit-appearance:none;appearance:none;display:block;min-width:0;max-width:100%;height:44px;text-align:left}
+input[type=date]::-webkit-date-and-time-value{text-align:left}
+@media (max-width:480px){.row>label{flex-basis:100%}}
 .form{display:flex;flex-direction:column;gap:10px}
 .primary{background:var(--accent);color:var(--on-accent);border:0;border-radius:4px;padding:11px 14px;font-weight:600;min-height:46px}
 .secondary{background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:10px 14px;font-weight:600;min-height:44px}
@@ -135,8 +138,10 @@ textarea{resize:vertical;min-height:70px}
 .group.l h3{color:var(--late)} .group.w h3{color:var(--warn)}
 .foot{font-size:12px;color:var(--muted);text-align:center}
 .fab{position:fixed;right:16px;bottom:calc(16px + var(--sab));z-index:5;background:var(--accent);color:var(--on-accent);border:0;border-radius:6px;padding:13px 18px;font-weight:600;min-height:48px;box-shadow:0 6px 18px rgba(0,0,0,.28)}
-.sheet{position:fixed;inset:0;z-index:10;background:rgba(10,18,34,.55);display:flex;align-items:flex-end;justify-content:center}
-.sheet .form{background:var(--surface);border-radius:10px 10px 0 0;padding:16px 16px calc(16px + var(--sab));width:100%;max-width:640px;max-height:92%;overflow:auto}
+.sheet{position:fixed;top:0;left:0;right:0;height:100%;z-index:10;background:rgba(10,18,34,.55);display:flex;align-items:flex-end;justify-content:center}
+.sheet .form{background:var(--surface);border-radius:10px 10px 0 0;padding:16px 16px calc(16px + var(--sab));width:100%;max-width:640px;max-height:92%;overflow:auto;-webkit-overflow-scrolling:touch}
+.sheet .actions{padding-top:6px}
+.sheet .actions .secondary{flex:0 0 auto}
 .sheet h2{font-size:17px;font-weight:600}
 body.lock{overflow:hidden}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(80px + var(--sab));z-index:20;background:var(--ink);color:var(--bg);padding:10px 14px;border-radius:6px;font-size:14px;max-width:calc(100% - 32px)}
@@ -374,7 +379,7 @@ function render(){
     ?'<ul class="list">'+list.map(function(t){return taskHTML(t,false);}).join('')+'</ul>'
     :'<div class="empty">No hay trabajos para entregar este día.</div>';
   var nota=$('nota'); if(document.activeElement!==nota)nota.value=notes[sel]||'';
-  $('sheet').hidden=!formOpen; document.body.classList.toggle('lock',formOpen);
+  $('sheet').hidden=!formOpen; document.body.classList.toggle('lock',formOpen); fitSheet();
   $('abrir').textContent='Añadir trabajo para el '+corto(sel);
   $('f-err').textContent=formErr;
   $('f-save').disabled=saving;
@@ -386,6 +391,15 @@ function render(){
   }).join('');
   $('todos-lista').innerHTML=h||'<div class="body"><div class="empty">No hay trabajos pendientes. Toca "+ Nuevo trabajo" para añadir uno.</div></div>';
 }
+
+/* La ventana de nuevo trabajo se ajusta al espacio que deja el teclado */
+function fitSheet(){
+  var sh=$('sheet'), vv=window.visualViewport; if(!sh)return;
+  if(!formOpen||!vv){sh.style.top='';sh.style.height='';return;}
+  sh.style.top=vv.offsetTop+'px'; sh.style.height=vv.height+'px';
+}
+if(window.visualViewport){visualViewport.addEventListener('resize',fitSheet);visualViewport.addEventListener('scroll',fitSheet);}
+document.addEventListener('focusin',function(e){if(formOpen&&e.target.closest&&e.target.closest('#form')){setTimeout(function(){fitSheet();e.target.scrollIntoView({block:'nearest'});},300);}});
 
 /* ---------- acciones ---------- */
 shell();
